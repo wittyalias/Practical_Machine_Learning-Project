@@ -5,26 +5,96 @@ date: "August 15, 2015"
 output: html_document
 ---
 
-#Instructions
-The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
-
-1. Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).
-2. You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details. 
-
-```{r echo = FALSE}
-maindata <- read.csv ("pml-training.csv")
-
-```
-
 
 #Introduction
+This paper is written to fulfill the requirements of the Practical Machine Learning Course presented by the Johns Hopkins Bloomberg School of Public Health, hosted by Coursera. It is based on research and data collected by Velloso _et al_ (2013) and hosted by the Human Activity Recognition project at groupware.les.inf.puc-rio.br/har. 
 
+Qualitative activity recognition is generally focussed on identifying the _type_ of activity a person is undertaking, for instance identifying whether a person is walking, sitting or sleeping. However, researchers in the field are expanding into questions of _how well_ a person is undertaking an activity. To explore this issue Velloso _et al_ collected data from a number of volunteers wearing a several sensors as they performed a simple exercise both correctly and incorrectly. 
+
+The challenge then was to use machine learning techniques in an attempt to classify the proper and improper techniques. 
+
+```{r library_initiation, message=FALSE, warning = FALSE}
+#load required libraries
+library(ggplot2)
+library(caret)
+library(dplyr)
+#doParallel used for running parallel processes on windows
+library(doParallel)
+library(randomForest)
+```
 
 #Data Exploration
+There were a number of features missing from the test data set - these were all of the derived features used by the original researchers to do their own modelling analysis. All features missing from the test data set were removed from both the test and the training sets. 
 
+```{r data_cleaning, echo = FALSE,cache=TRUE}
+maindata <- read.csv ("data/pml-training.csv")
+testing <- read.csv("data/pml-testing.csv")
+
+todrop <- c("kurt", "skew", "max", "min", "ampli", "avg", "stddev", "var")
+
+#create a vector of column numbers to be dropped using the todrop vector of characters above
+todrop2 <- NULL
+for (i in 1:length(todrop)){
+     todrop2 <- c(todrop2, grep(todrop[i], names(maindata)))
+}
+maindata <- maindata[,names(maindata[,-todrop2])]
+testing <- testing[,names(testing[,-todrop2])]
+
+predicorcols <- 8:60 #the columns of predictors to include (plus classe)
+```
+
+Given the power of the random forest model to evaluate feature importance, it was chosen as an initial model to explore the data. It was trained with its default values. 
+
+```{r base_model, eval=FALSE}
+#The code around the model is to enable parallel processing on a windows machine
+cl <- makeCluster(3)
+registerDoParallel(cl)
+set.seed(1000)
+modFit <- train(classe~.,  data = maindata[,predicorcols],  method = "rf", ntree = 500)
+stopCluster(cl)
+save(modFit, file = "fullRFMod.Rdata")
+```
 
 #Model Build
 
+The model proved to be very accurate - 99.3%. Unfortunately, that accuracy estimate, reflected in the table below, is likely incorrect for out-of-sample error and is probably the result of some overfitting. Having said that, this model was correct for all of the test cases. The confusion Matrix shows minor errors in classification of each of the classes. 
 
-#Errors
+```{r review_base_model, cache = TRUE}
+load("fullRFMod.Rdata")
+pred <- predict(modFit, testing)
+modFit
+confusionMatrix(modFit, norm = "none")
+```
 
+#Accuracy
+
+To better evaluate the out-of-sample accuracy, the model was re-run using the out-of-bag error estimate. This is a modified modelling method that leaves out about one-third of the original data and then uses them within the model as test cases. These provide a better estimate of out-of-sample error without necessitating further cross-validation (as claimed by: https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm). However, some have claimed that the oob error estimates are too pessimistic (http://info.salford-systems.com/blog/bid/288278/Random-Forests-OOB-vs-Test-Partition-Performance).
+
+```{r second_model, eval = FALSE}
+cl <- makeCluster(3)
+registerDoParallel(cl)
+set.seed(1000)
+modFit2 <- train(classe~.,  data = maindata[,predicorcols],  method = "rf", ntree = 500, trControl = trainControl(method = "oob"))
+stopCluster(cl)
+save(modFit2, file = "fullRFMod2.Rdata")
+```
+
+The out-of-bag error estimates below are actually above the error estimates for the previous model run, this suggests that an out-of-sample accuracy for the model to be above 99%. 
+
+```{r review_second_model, cache = TRUE}
+load("fullRFMod2.Rdata")
+pred2 <- predict(modFit2, testing)
+modFit2
+#confusionMatrix(pred, pred2)
+```
+
+```{r write_answers, echo = FALSE, eval = FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("answers/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(as.character(pred))
+```
